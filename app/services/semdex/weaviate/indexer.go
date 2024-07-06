@@ -24,17 +24,41 @@ func (s *weaviateSemdexer) Index(ctx context.Context, object datagraph.Indexable
 		return nil
 	}
 
-	_, err := s.wc.Data().Creator().
+	_, err := s.wc.Data().ObjectsGetter().
 		WithClassName(s.cn.String()).
 		WithID(wid).
-		WithProperties(map[string]any{
-			"datagraph_id":   sid.String(),
-			"datagraph_type": object.GetKind(),
-			"name":           object.GetName(),
-			"content":        content,
-			"props":          object.GetProps(),
-		}).
 		Do(ctx)
+
+	we := &weaviate_errors.WeaviateClientError{}
+	nonExistent := errors.As(err, &we) && we.StatusCode == 404
+
+	if err != nil && !nonExistent {
+		return fault.Wrap(err, fctx.With(ctx))
+	}
+
+	props := map[string]any{
+		"datagraph_id":   sid.String(),
+		"datagraph_type": object.GetKind(),
+		"name":           object.GetName(),
+		"description":    object.GetDesc(),
+		"content":        content,
+		"props":          object.GetProps(),
+	}
+
+	if !nonExistent {
+		err = s.wc.Data().Updater().
+			WithClassName(s.cn.String()).
+			WithID(wid).
+			WithProperties(props).
+			Do(ctx)
+	} else {
+		_, err = s.wc.Data().Creator().
+			WithClassName(s.cn.String()).
+			WithID(wid).
+			WithProperties(props).
+			Do(ctx)
+	}
+
 	if err != nil {
 		we := &weaviate_errors.WeaviateClientError{}
 		if errors.As(err, &we) {
